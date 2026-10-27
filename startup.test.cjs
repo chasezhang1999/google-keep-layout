@@ -300,3 +300,397 @@ test('invalid saved bounds are ignored', t => {
   run();
   assert.deepEqual(log.calls, []);
 });
+
+test('a second click on the menu button closes the dropdown even when Keep closes it on pointerdown', async t => {
+  const { w, run } = setup(t);
+  run();
+  const menu = keepMenu(w);
+  const click = () => {
+    menu.button.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    menu.button.click();
+  };
+  click(); await wait(20);
+  assert.equal(menu.open(), true);
+  // 窄窗时 Keep 在按下鼠标时就把菜单当「点到外面」关掉，紧接着按钮的 click 又会把它打开
+  menu.button.addEventListener('pointerdown', () => {
+    if (menu.open()) {
+      w.document.querySelector('.PvRhvb').classList.add('PvRhvb-qAWA2');
+      menu.button.setAttribute('aria-expanded', 'false');
+    }
+  });
+  click(); await wait(20);
+  assert.equal(menu.open(), false);
+  assert.equal(menu.button.getAttribute('aria-expanded'), 'false');
+  click(); await wait(20);
+  assert.equal(menu.open(), true);
+  click(); await wait(20);
+  assert.equal(menu.open(), false);
+});
+
+// 下面测 0.7.0 的原位编辑和标签按钮。结构照 2026-10 在真实页面上核对过的 Keep 搭（类名见 README），
+// 只模仿脚本依赖的那几个 Keep 行为；jsdom 不排版，位置和高度都是手写的。
+const OPEN_CLASS = 'XKSfm-L9AdLc-prCEue-uA7qgc';
+const tick = () => wait(0);
+const rectAt = (left, top, width, height) =>
+  ({ x: left, y: top, left, top, width, height, right: left + width, bottom: top + height });
+const press = (w, target, type = 'pointerdown') =>
+  target.dispatchEvent(new w.MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+const key = (w, target, name) =>
+  target.dispatchEvent(new w.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+
+function keepNotes(w, { menuItems = ['Delete note', 'Add label', 'Add drawing'] } = {}) {
+  const doc = w.document;
+  const make = (className, parent, attrs = {}) => {
+    const element = doc.createElement('div');
+    element.className = className;
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    parent.append(element);
+    return element;
+  };
+  // 页面滚动：脚本读 scrollX / scrollY、调 scrollTo
+  const view = { x: 0, y: 0, scrolls: [] };
+  Object.defineProperty(w, 'scrollX', { get: () => view.x, configurable: true });
+  Object.defineProperty(w, 'scrollY', { get: () => view.y, configurable: true });
+  w.scrollTo = (x, y) => { view.scrolls.push([x, y]); Object.assign(view, { x, y }); };
+  const scrollBy = dy => { view.y += dy; w.dispatchEvent(new w.Event('scroll')); };
+  // 动画帧由测试一帧一帧推
+  let lastFrame = 0;
+  const frames = new Map();
+  w.requestAnimationFrame = fn => { frames.set(++lastFrame, fn); return lastFrame; };
+  w.cancelAnimationFrame = id => frames.delete(id);
+  const frame = () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const fn of due) fn(w.performance.now());
+  };
+
+  // 列表：两列，卡片宽 240、间距 16。和 Keep 一样位置写在行内 transform 里；分组从页面 y=100 开始
+  const notes = make('notes-container', doc.body);
+  const group = make('', make('gkA7Yd-sKfxWe', notes));
+  const layout = new Map();
+  const place = (element, x, y, height) => {  // Keep 排版
+    layout.set(element, { x, y, height });
+    element.style.transform = `translate(${x}px, ${y}px)`;
+  };
+  const card = (x, y, height) => {
+    const element = make('IZ65Hb-n0tgWb', group, { tabindex: '0' });
+    make('gkA7Yd-HiaYvf', element, { tabindex: '0' });  // 卡片里能拿焦点的一层
+    Object.defineProperty(element, 'offsetWidth', { get: () => 240 });
+    element.getBoundingClientRect = () => {
+      const box = layout.get(element);
+      return rectAt(8 + box.x, 100 + box.y - view.y, 240, box.height);
+    };
+    place(element, x, y, height);
+    return element;
+  };
+  const cards = { a: card(0, 0, 100), b: card(0, 116, 80), c: card(256, 0, 150), d: card(256, 166, 60) };
+
+  // Keep 自己的编辑框：一直在页面里，打开时加 eo9XGd。底栏有协作者、More 和 Close
+  const editor = make('VIpgJd-TUo6Hb XKSfm-L9AdLc', doc.body);
+  const size = { editor: 180 };
+  editor.getBoundingClientRect = () => rectAt(0, 0, 240, size.editor);
+  const inner = make('IZ65Hb-n0tgWb', editor, { tabindex: '-1' });
+  const text = make('IZ65Hb-vIzZGf-L9AdLc-haAclf', make('IZ65Hb-TBnied', inner), { contenteditable: 'true', tabindex: '0' });
+  const footer = make('IZ65Hb-nK2kYb', inner);
+  const toolbar = make('IZ65Hb-INgbqf', footer, { role: 'toolbar' });
+  const label = make('euCgFf', toolbar, { role: 'button', 'aria-label': 'Collaborator' });
+  const more = make('xl07Ob', toolbar, { role: 'button', 'aria-label': 'More' });
+  const close = make('IZ65Hb-TvD9Pc IZ65Hb-iib5kc', footer, { role: 'button' });
+  close.textContent = 'Close';
+  close.getClientRects = () => (editor.classList.contains('eo9XGd') ? [rectAt(0, 0, 28, 28)] : []);
+
+  const log = { close: 0, more: 0, labels: 0, keep: [] };
+  let source = null;
+  // 打开：原卡片加 fbudBf、编辑框加 eo9XGd、body 加 OPEN_CLASS，都在同一轮任务里
+  const open = (target, { focusScroll = 0 } = {}) => {
+    source = target;
+    target.classList.add('IZ65Hb-fbudBf');
+    editor.classList.add('eo9XGd');
+    view.y += focusScroll;  // 万一 Keep 的 focus() 把页面滚走了
+    doc.body.classList.add(OPEN_CLASS);
+  };
+  // 编辑中点了另一张卡片：弹窗不关，直接换成那条记事
+  const switchTo = target => {
+    source.classList.remove('IZ65Hb-fbudBf');
+    source = target;
+    target.classList.add('IZ65Hb-fbudBf');
+  };
+  // 关闭：先 focus 编辑框里的卡片，再去掉 OPEN_CLASS；退场动画放完，再 focus 列表里原卡片中的一层，然后去掉编辑框的 eo9XGd。
+  // 两次 focus 都不带 preventScroll，被 focus 的东西没露全时浏览器会先把页面滚过去、再派发 focusin
+  const shut = ({ focusScroll = 0 } = {}) => {
+    const card = source;
+    view.y += focusScroll;
+    inner.focus();
+    card.classList.remove('IZ65Hb-fbudBf');
+    source = null;
+    doc.body.classList.remove(OPEN_CLASS);
+    setTimeout(() => {
+      view.y += focusScroll;
+      card.querySelector('.gkA7Yd-HiaYvf').focus();
+      editor.classList.remove('eo9XGd');
+    }, 20);
+  };
+  close.addEventListener('mouseup', () => { log.close++; shut(); });
+  // More：松开时弹出菜单（挂在 body 下）；菜单里的「添加标签」松开时换成标签选择框
+  more.addEventListener('mouseup', () => {
+    log.more++;
+    const menu = make('Q0hgme-xl07Ob', doc.body, { role: 'menu' });
+    menu.getBoundingClientRect = () => rectAt(0, 0, 200, 30 * menuItems.length);
+    for (const name of menuItems) {
+      const item = make('', menu, { role: 'menuitem' });
+      item.textContent = name;
+      item.addEventListener('mouseup', () => {
+        if (!/label|标签/i.test(name)) return;
+        log.labels++;
+        menu.remove();
+        make('mQXP-L9AdLc', doc.body, { role: 'dialog' });
+      });
+    }
+  });
+  // Keep 自己挂在协作者按钮上的处理（打开协作者对话框）：一次也不该收到
+  for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) label.addEventListener(type, () => log.keep.push(type));
+  return { doc, view, scrollBy, frame, notes, group, cards, place, editor, size, text, label, more, log, open, switchTo, shut };
+}
+
+test('list cards drop their toolbar; pinned notes are marked on the inner frame', t => {
+  const { run, style } = setup(t);
+  run();
+  const css = style().textContent;
+  assert.match(css, /\.gkA7Yd-sKfxWe \.IZ65Hb-nK2kYb \{ display: none !important; \}/);
+  assert.match(css, /\.gkA7Yd-sKfxWe \.neVct-LS81yb-tJHJj \{ visibility: hidden !important; \}/);
+  // 卡片外层没有边框，边框画在里层的 TBnied 上
+  assert.match(css, /\.IZ65Hb-n0tgWb\.IZ65Hb-bJ69tf > \.IZ65Hb-TBnied \{ border-color: #c6a34c !important; \}/);
+  // Close 还是 Keep 自己的按钮，只是字换成 × 图标
+  assert.match(css, /\.IZ65Hb-TvD9Pc \{[^}]*font-size: 0 !important;[^}]*--kc-icon: url\("data:image\/svg\+xml,/);
+  // 原位编辑框不能当滚动锚点，不然打开后图片撑开时整页往下滚
+  assert.match(css, /\.XKSfm-L9AdLc\.kc-inline \{[^}]*overflow-anchor: none !important;/);
+});
+
+test('opening a card puts the Keep editor on it and pushes only that column down', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  press(w, k.cards.a);
+  k.open(k.cards.a);
+  await tick();
+  assert.ok(k.editor.classList.contains('kc-inline'));
+  assert.ok(k.doc.body.classList.contains('kc-editing'));
+  assert.deepEqual(['--kc-left', '--kc-top', '--kc-width'].map(name => k.editor.style.getPropertyValue(name)),
+    ['8px', '100px', '240px']);
+  // 编辑框 180 高、原卡片 100 高：同一列下面的 B 推下 80，分组底部也留出 80；另一列不动
+  assert.equal(k.cards.b.style.translate, '0 80px');
+  assert.equal(k.group.style.marginBottom, '80px');
+  assert.equal(k.cards.c.style.translate, '');
+  assert.equal(k.cards.d.style.translate, '');
+  assert.deepEqual(k.view.scrolls, [], 'opening never scrolls the page');
+});
+
+test('while typing, the push follows the editor height and the room Keep leaves', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.open(k.cards.a);
+  await tick();
+  // 编辑框长到 230；Keep 顺手把藏着的原卡片撑到 150，但还没重排下面的卡片：按 Keep 留的空间算，推 130
+  k.size.editor = 230;
+  k.place(k.cards.a, 0, 0, 150);
+  k.frame();
+  assert.equal(k.cards.b.style.translate, '0 130px');
+  // Keep 重排后 B 挪到 166：只需再推 80
+  k.place(k.cards.b, 0, 166, 80);
+  k.frame();
+  assert.equal(k.cards.b.style.translate, '0 80px');
+  assert.equal(k.group.style.marginBottom, '80px');
+});
+
+test('clicking another card while editing moves the editor there and releases the old column', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.open(k.cards.a);
+  await tick();
+  // 点别的卡片不能当成「点到外面」先关掉，否则 Keep 会忽略这次点击
+  press(w, k.cards.c);
+  assert.equal(k.log.close, 0);
+  k.switchTo(k.cards.c);
+  k.frame();
+  assert.equal(k.editor.style.getPropertyValue('--kc-left'), '264px');
+  assert.equal(k.cards.b.style.translate, '');
+  // C 高 150、下面的 D 在 166：编辑框 180，推 30
+  assert.equal(k.cards.d.style.translate, '0 30px');
+});
+
+test('closing puts everything back and keeps the page where it was, even after Keep scrolls to the card', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.open(k.cards.a);
+  await tick();
+  k.scrollBy(50);  // 编辑时自己往下滚了一点
+  // 编辑框里的焦点变化不管（Tab 到屏幕外的一栏，浏览器滚过去是对的）
+  k.view.y += 30;
+  k.text.focus();
+  assert.equal(k.view.y, 80);
+  k.scrollBy(-30);
+  k.shut({ focusScroll: 180 });  // Keep 关闭时 focus 编辑框里的卡片，浏览器把页面滚走 180
+  await tick();
+  assert.equal(k.view.y, 50, 'pulled back in the same task, before the next paint');
+  assert.equal(k.cards.b.style.translate, '');
+  assert.equal(k.group.style.marginBottom, '');
+  assert.equal(k.cards.b.style.transform, 'translate(0px, 116px)', 'card positions stay Keep’s');
+  assert.ok(!k.doc.body.classList.contains('kc-editing'));
+  // 退场动画期间编辑框还挂着 kc-inline（样式把它原地藏住，免得跳回屏幕中间），放完才交还给 Keep
+  assert.ok(k.editor.classList.contains('kc-inline'));
+  await wait(40);  // 退场动画放完时 Keep 又 focus 一次，又滚走 180
+  assert.equal(k.view.y, 50);
+  assert.deepEqual(k.view.scrolls, [[0, 50], [0, 50]]);
+  assert.ok(!k.editor.classList.contains('kc-inline'));
+  assert.equal(k.editor.style.getPropertyValue('--kc-top'), '');
+  // 收起以后就不管了，之后的 focus 照常滚
+  k.view.y += 100;
+  k.cards.b.focus();
+  assert.equal(k.view.y, 150);
+});
+
+test('a note opened from a link, with no card in the list, keeps the normal Keep dialog', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.editor.classList.add('eo9XGd');
+  k.doc.body.classList.add(OPEN_CLASS);
+  await tick();
+  assert.ok(!k.editor.classList.contains('kc-inline'));
+  assert.ok(!k.doc.body.classList.contains('kc-editing'));
+  k.view.y = 300;
+  k.doc.body.classList.remove(OPEN_CLASS);
+  await tick();
+  assert.deepEqual(k.view.scrolls, []);
+});
+
+test('if opening scrolls the page anyway, it goes back to where the card was clicked', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.view.y = 40;
+  press(w, k.cards.b);
+  k.open(k.cards.b, { focusScroll: 300 });
+  await tick();
+  assert.deepEqual(k.view.scrolls, [[0, 40]]);
+  // 编辑框贴在 B 上：页面坐标 100 + 116
+  assert.equal(k.editor.style.getPropertyValue('--kc-top'), '216px');
+});
+
+test('Escape is left to Keep inside the editor and to open menus; from elsewhere it closes', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.open(k.cards.a);
+  await tick();
+  k.text.focus();
+  key(w, k.text, 'Escape');
+  assert.equal(k.log.close, 0, 'Keep handles Escape in its own editor');
+  const menu = k.doc.createElement('div');
+  menu.className = 'Q0hgme-xl07Ob';
+  menu.tabIndex = 0;
+  k.doc.body.append(menu);
+  menu.focus();
+  key(w, menu, 'Escape');
+  assert.equal(k.log.close, 0, 'an open menu gets Escape first');
+  menu.blur();
+  key(w, k.doc.body, 'Escape');
+  assert.equal(k.log.close, 1);
+});
+
+test('clicking blank page space closes through the Keep close button; the editor and menus do not', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  k.open(k.cards.a);
+  await tick();
+  press(w, k.text);
+  const floating = k.doc.createElement('div');
+  floating.className = 'Q0hgme-xl07Ob';
+  k.doc.body.append(floating);
+  press(w, floating);
+  assert.equal(k.log.close, 0);
+  press(w, k.notes);
+  assert.equal(k.log.close, 1);
+  await tick();
+  assert.ok(!k.doc.body.classList.contains('kc-editing'));
+});
+
+test('wheel scrolling over the editor reaches the page instead of the Keep scroll blocker', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  let blocked = 0;
+  // Keep 打开编辑框后，会把编辑框上的老式 mousewheel 事件 preventDefault 掉
+  k.editor.addEventListener('mousewheel', event => { blocked++; event.preventDefault(); });
+  const wheel = () => k.text.dispatchEvent(new w.Event('mousewheel', { bubbles: true, cancelable: true }));
+  assert.equal(wheel(), false, 'not editing: left to Keep');
+  k.open(k.cards.a);
+  await tick();
+  assert.equal(wheel(), true);
+  assert.equal(blocked, 1);
+});
+
+for (const [language, menuItems] of [['English', ['Delete note', 'Add label', 'Add drawing']], ['中文', ['删除记事', '添加标签', '添加绘图']]]) {
+  test(`label button (${language}) opens the Keep label picker through More; Keep never sees the press`, async t => {
+    const { w, run } = setup(t);
+    const k = keepNotes(w, { menuItems });
+    run();
+    k.open(k.cards.a);
+    await tick();
+    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) press(w, k.label, type);
+    assert.deepEqual(k.log.keep, [], 'the collaborator dialog never opens');
+    assert.equal(k.log.more, 1);
+    assert.equal(k.log.labels, 1);
+    assert.ok(k.doc.querySelector('.mQXP-L9AdLc'));
+    assert.ok(!k.doc.documentElement.classList.contains('kc-labels-opening'), 'More menus show normally again');
+  });
+}
+
+test('the label button in the new-note bar works the same way', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  const composer = k.doc.createElement('div');
+  composer.className = 'h1U9Be-xhiy4';
+  const bar = k.doc.createElement('div');
+  bar.className = 'IZ65Hb-INgbqf';
+  bar.append(k.label, k.more);  // 新建栏里也是同一组按钮
+  composer.append(bar);
+  k.doc.body.append(composer);
+  press(w, k.label, 'click');
+  assert.equal(k.log.more, 1);
+  assert.equal(k.log.labels, 1);
+});
+
+test('if the label item cannot be found, the More menu is simply left open', async t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w, { menuItems: ['Delete note', 'Make a copy'] });
+  run();
+  k.open(k.cards.a);
+  await tick();
+  press(w, k.label, 'click');
+  const opening = () => k.doc.documentElement.classList.contains('kc-labels-opening');
+  assert.ok(opening(), 'More menu hidden while looking for the item');
+  const end = Date.now() + 1500;
+  while (opening() && Date.now() < end) { k.frame(); await wait(25); }
+  assert.ok(!opening());
+  assert.equal(k.log.labels, 0);
+  assert.ok(k.doc.querySelector('.Q0hgme-xl07Ob'), 'More menu stays for the user');
+});
+
+test('hovering the label button relabels its tooltip in the page language', t => {
+  const { w, run } = setup(t);
+  const k = keepNotes(w);
+  run();
+  const chinese = k.label.cloneNode();
+  chinese.setAttribute('aria-label', '协作者');
+  k.label.after(chinese);
+  for (const button of [k.label, chinese]) button.dispatchEvent(new w.MouseEvent('pointerover', { bubbles: true }));
+  assert.equal(k.label.getAttribute('data-tooltip-text'), 'Labels');
+  assert.equal(chinese.getAttribute('data-tooltip-text'), '标签');
+  assert.equal(chinese.getAttribute('aria-label'), '标签');
+});
