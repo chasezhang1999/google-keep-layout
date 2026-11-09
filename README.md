@@ -5,7 +5,7 @@
 
 ## 仓库
 
-GitHub 私有库 `chasezhang1999/google-keep-layout`（2026-10-22 起），各台电脑以它为准。
+GitHub 仓库 `chasezhang1999/google-keep-layout`（2026-10-22 起），各台电脑以它为准。
 新电脑上拉到 `D:\Code\google-keep-layout`：`gh repo clone chasezhang1999/google-keep-layout D:\Code\google-keep-layout`，
 再按下面「安装和更新」装脚本、建快捷方式。`node_modules` 不进库，要跑测试先 `pnpm install`。
 
@@ -96,9 +96,9 @@ Edge 也一样（10-22，Edge 155）：装成应用的窗口同样拖不窄（Ch
 
 ## 安装和更新
 
-1. **油猴脚本**：打开 Tampermonkey 控制面板，点开「Google Keep 窄窗布局」（没装就「添加新脚本」），
-   把 `google-keep-layout.user.js` 的全部内容粘贴进去替换原有内容，按 Ctrl+S 保存，再刷新或重开 Keep。
-   脚本名和命名空间与旧版相同，会替换旧版。只改磁盘上的文件不会更新已安装的脚本。
+1. **油猴脚本**：
+   - **一键安装 / 更新**：在装有 Tampermonkey 的浏览器里直接打开 [`google-keep-layout.user.js` (Raw)](https://raw.githubusercontent.com/chasezhang1999/google-keep-layout/main/google-keep-layout.user.js)，油猴会自动弹出安装或升级界面；日常也可通过 Tampermonkey「检查更新」自动拉取最新版。
+   - **手动粘贴**：打开 Tampermonkey 控制面板，点开「Google Keep 窄窗布局」（没装就「添加新脚本」），把 `google-keep-layout.user.js` 的全部内容粘贴进去替换原有内容，按 Ctrl+S 保存，再刷新或重开 Keep。脚本名和命名空间与旧版相同，会替换旧版。只改磁盘上的文件不会更新已安装的脚本。
 2. **快捷方式**：PC、ASUS 上已建好（桌面和开始菜单里的「Keep 窄窗」）。别的电脑上运行：
    `powershell -ExecutionPolicy Bypass -File create-shortcut.ps1`
    （Chrome 用户资料不是 Default 时加 `-ChromeProfile "Profile 1"` 之类）。

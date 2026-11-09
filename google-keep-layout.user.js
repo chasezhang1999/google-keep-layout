@@ -10,6 +10,10 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @noframes
+// @homepageURL  https://github.com/chasezhang1999/google-keep-layout
+// @supportURL   https://github.com/chasezhang1999/google-keep-layout/issues
+// @updateURL    https://raw.githubusercontent.com/chasezhang1999/google-keep-layout/main/google-keep-layout.user.js
+// @downloadURL  https://raw.githubusercontent.com/chasezhang1999/google-keep-layout/main/google-keep-layout.user.js
 // ==/UserScript==
 
 (() => {
